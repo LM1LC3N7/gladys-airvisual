@@ -99,6 +99,10 @@ export class AirVisualApp {
       () => this.tick().catch((err) => this.logger.warn(`Refresh failed: ${this.scrub(err)}`)),
       TICK,
     );
+    // Gladys keeps the Discovery list in memory only: a (re)connection may
+    // follow a restart of the core, so it is published again even when no
+    // source was due (the tick then publishes nothing).
+    await this.publishDiscovered();
     await this.refreshStatus();
   }
 

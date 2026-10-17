@@ -205,6 +205,36 @@ test('a refused key: the reads stop, the status says it, one try every 6 hours',
   assert.equal(ctx.gladys.fake.connectionStatus.connected, true);
 });
 
+test('disconnection then reconnection (Gladys restarted): status and Discovery published again', async () => {
+  const { app, gladys } = await setup();
+  const statuses = gladys.fake.connectionStatuses.length;
+  const discoveries = gladys.fake.bodies('POST', '/discovered_device').length;
+  const before = { status: gladys.fake.connectionStatus, devices: gladys.fake.discoveredDevices };
+  await gladys.disconnect();
+  app.stop();
+  await gladys.connect();
+  await app.start({ api_key: KEY });
+  assert.equal(calls(API).length, 1, 'nothing due: no new read');
+  assert.equal(gladys.fake.connectionStatuses.length, statuses + 1);
+  assert.deepEqual(gladys.fake.connectionStatus, before.status);
+  assert.equal(gladys.fake.bodies('POST', '/discovered_device').length, discoveries + 1);
+  assert.deepEqual(gladys.fake.discoveredDevices, before.devices);
+});
+
+test('reconnection with a refused key: the refusal is published again, no call', async () => {
+  const ctx = await setup({ start: false });
+  ctx.answers.nearest = () => fail('incorrect_api_key', 400);
+  await ctx.app.start({ api_key: KEY });
+  const statuses = ctx.gladys.fake.connectionStatuses.length;
+  await ctx.gladys.disconnect();
+  ctx.app.stop();
+  await ctx.gladys.connect();
+  await ctx.app.start({ api_key: KEY });
+  assert.equal(calls(API).length, 1);
+  assert.equal(ctx.gladys.fake.connectionStatuses.length, statuses + 1);
+  assert.deepEqual(ctx.gladys.fake.connectionStatus, { connected: false, message: T.keyRefused });
+});
+
 test('a 429: a bounded pause for every path, kept across a reconnection', async () => {
   const ctx = await setup({ start: false });
   ctx.answers.nearest = () => fail('call_limit_reached', 429);
