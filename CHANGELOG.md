@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-10-17
+
 ### Fixed
 
 - Status and Discovery republished after Gladys restarts.
@@ -41,5 +43,6 @@ the notes of the version's GitHub Release.
 - "Test AirVisual" button: one call to check the key, the last values of
   every location and of the monitors.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-airvisual/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/LM1LC3N7/gladys-airvisual/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/LM1LC3N7/gladys-airvisual/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/LM1LC3N7/gladys-airvisual/releases/tag/v0.1.1
