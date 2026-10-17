@@ -79,12 +79,15 @@ async function readBounded(response, url, maxBytes) {
  * parsed JSON, or the raw text when it is not JSON. Throws a NetworkError when
  * the request or the body read fails.
  */
-export async function getJson(url, { timeout = HTTP_TIMEOUT, maxBytes } = {}) {
+export async function getJson(url, { timeout = HTTP_TIMEOUT, maxBytes, redirect = 'error' } = {}) {
   let response;
   let text;
   try {
     response = await fetchImpl(url, {
       headers: { 'User-Agent': USER_AGENT, Accept: 'application/json' },
+      // No redirection is followed blindly: 'error' fails the call, 'manual'
+      // hands the 3xx answer (and its Location) to the caller.
+      redirect,
       signal: AbortSignal.timeout(Math.max(1, timeout)),
     });
     text = await readBounded(response, url, maxBytes ?? Infinity);
@@ -101,5 +104,6 @@ export async function getJson(url, { timeout = HTTP_TIMEOUT, maxBytes } = {}) {
     status: response.status,
     body,
     retryAfterMs: retryAfterMs(response.headers?.get?.('retry-after')),
+    location: response.headers?.get?.('location') ?? undefined,
   };
 }

@@ -15,6 +15,7 @@ import {
   createFakeTimers,
   fail,
   fixture,
+  flush,
   installFetch,
   json,
   quiet,
@@ -35,6 +36,7 @@ async function setup({
   houses = [HOME, BOAT],
   start = true,
   storage = memoryStorage(),
+  now = FIXTURE_NOW,
 } = {}) {
   const answers = {
     nearest: () => json(fixture('nearest_city.json')),
@@ -48,7 +50,7 @@ async function setup({
   ]);
   const gladys = createFakeGladys({ selector: 'airvisual', config, houses });
   const timers = createFakeTimers();
-  const clock = { now: FIXTURE_NOW };
+  const clock = { now };
   const client = new AirVisualClient({
     now: () => clock.now,
     sleep: async (ms) => {
@@ -144,7 +146,7 @@ test('five locations: the interval is raised so the free plan holds', async () =
   const { gladys, timers, clock, app } = await setup({ config });
   // The house and four cities: five locations at most.
   assert.equal(app.locations().length, 5);
-  assert.equal(app.locationInterval(), 27);
+  assert.equal(app.locationInterval(), 28);
   assert.match(gladys.fake.connectionStatus.message.en, /1 more location\(s\) ignored/);
   const start = clock.now;
   await runMinutes(timers, clock, 24 * 60 - Math.round((clock.now - start) / 60_000));
@@ -264,7 +266,7 @@ test('AirVisual Pro: PM2.5, PM10, CO2, temperature, humidity; no API key needed'
 
 test('a node down never blocks the locations, and the reverse', async () => {
   const ctx = await setup({ start: false });
-  ctx.answers.node = () => json('node not found', 404);
+  ctx.answers.node = () => json({}, 503);
   ctx.answers.nearest = () => fail('incorrect_api_key');
   await ctx.app.start({ api_key: KEY, node_ids: NODE_ID });
   assert.equal(ctx.gladys.fake.discoveredDevices.length, 0);
@@ -348,4 +350,175 @@ test('no secret in the logs', async () => {
   for (const line of lines) {
     assert.ok(!line.includes(KEY) && !line.includes(NODE_ID), line);
   }
+});
+
+// --- Review fixes --------------------------------------------------------------------
+
+const MIDNIGHT = Date.parse('2026-10-17T00:00:00Z');
+const FIVE_CITIES = [
+  'Lyon, Auvergne-Rhone-Alpes, France',
+  'Nowhere, Void, Atlantis',
+  'Paris, Ile-de-France, France',
+  'Nice, Provence-Alpes-Cote d Azur, France',
+  'Brest, Brittany, France',
+].join('; ');
+
+/** A whole UTC day: the calls per city, and the last call of each. */
+async function simulateDay(answer) {
+  const config = { api_key: KEY, use_houses: false, cities: FIVE_CITIES, poll_interval: 10 };
+  const ctx = await setup({ config, start: false, now: MIDNIGHT });
+  ctx.answers.city = (c) => answer(c, ctx.clock.now);
+  await ctx.app.start(config);
+  while (ctx.clock.now < MIDNIGHT + 24 * 60 * 60_000 - TICK) {
+    ctx.clock.now += TICK;
+    await ctx.timers.runIntervals();
+  }
+  const today = calls(API).filter((c) => c.at < MIDNIGHT + 24 * 60 * 60_000);
+  const last = {};
+  for (const c of today) {
+    last[c.params.city] = c.at;
+  }
+  return { ctx, today, last };
+}
+
+test('a misspelt city among four good ones never drains the day', async () => {
+  const stamp = (c, now) => {
+    c.at = now;
+    return c.params.city === 'Nowhere' ? fail('city_not_found') : json(fixture('city.json'));
+  };
+  const { today, last } = await simulateDay(stamp);
+  assert.ok(today.length <= 270, `${today.length} calls in the UTC day`);
+  // The wrong city: tried at most every 6 hours.
+  assert.ok(today.filter((c) => c.params.city === 'Nowhere').length <= 4);
+  for (const city of ['Lyon', 'Paris', 'Nice', 'Brest']) {
+    assert.ok(last[city] >= MIDNIGHT + 23 * 60 * 60_000, `${city} still read before midnight`);
+  }
+});
+
+test('a 12-hour outage (5xx) never drains the day either', async () => {
+  const stamp = (c, now) => {
+    c.at = now;
+    if (now < MIDNIGHT + 12 * 60 * 60_000) {
+      return json({}, 503);
+    }
+    return c.params.city === 'Nowhere' ? fail('city_not_found') : json(fixture('city.json'));
+  };
+  const { today, last } = await simulateDay(stamp);
+  assert.ok(today.length <= 270, `${today.length} calls in the UTC day`);
+  for (const city of ['Lyon', 'Paris', 'Nice', 'Brest']) {
+    assert.ok(last[city] >= MIDNIGHT + 23 * 60 * 60_000, `${city} still read before midnight`);
+  }
+});
+
+test('the key works again: the locations that waited are read at the next tick', async () => {
+  const config = {
+    api_key: KEY,
+    use_houses: false,
+    cities: 'Lyon, Auvergne-Rhone-Alpes, France; Paris, Ile-de-France, France',
+  };
+  const ctx = await setup({ config, start: false });
+  ctx.answers.city = () => fail('incorrect_api_key');
+  await ctx.app.start(config);
+  assert.equal(calls(API).length, 1, 'the second city never went');
+  ctx.answers.city = () => json(fixture('city.json'));
+  // The test button may try the refused key, and it works now.
+  await ctx.gladys.fake.action(ACTIONS.TEST, {});
+  assert.equal(calls(API).length, 2);
+  await runMinutes(ctx.timers, ctx.clock, 1);
+  assert.equal(calls(API).length, 3, 'Paris read at once, not 6 hours later');
+  assert.equal(ctx.gladys.fake.connectionStatus.connected, true);
+});
+
+test('a restart keeps the 429 pause, the refusal and the 13 s spacing (not the key)', async () => {
+  const storage = memoryStorage();
+  const ctx = await setup({ start: false, storage });
+  ctx.answers.nearest = () => fail('call_limit_reached', 429);
+  await ctx.app.start({ api_key: KEY });
+  assert.equal(calls(API).length, 1);
+  assert.ok(!JSON.stringify(storage.load()).includes(KEY), 'only a hash of the key is saved');
+  // A new container: a new client and app on the same /data.
+  ctx.answers.nearest = () => json(fixture('nearest_city.json'));
+  const restarted = new AirVisualApp({
+    gladys: ctx.gladys,
+    logger: quiet,
+    now: () => ctx.clock.now,
+    timers: createFakeTimers(),
+    client: new AirVisualClient({ now: () => ctx.clock.now, storage, sleep: async () => {} }),
+  });
+  await restarted.start({ api_key: KEY });
+  assert.equal(calls(API).length, 1, 'the pause survived the restart');
+  assert.match(ctx.gladys.fake.connectionStatus.message.en, /no call before/);
+  // Another key starts afresh.
+  await restarted.start({ api_key: 'OTHER-KEY' });
+  assert.equal(calls(API).length, 2);
+});
+
+test('the spacing survives a restart', async () => {
+  const storage = memoryStorage();
+  const ctx = await setup({ storage });
+  assert.equal(calls(API).length, 1);
+  const sleeps = [];
+  const client = new AirVisualClient({
+    now: () => ctx.clock.now,
+    storage,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      ctx.clock.now += ms;
+    },
+  });
+  ctx.clock.now += 3_000;
+  await client.nearestCity(1, 2, { apiKey: KEY });
+  assert.deepEqual(sleeps, [10_000], 'waits the rest of the 13 s after the last call');
+});
+
+test('a call in flight when the key changes never blocks the new key', async () => {
+  const config = { api_key: KEY };
+  const ctx = await setup({ config, start: false });
+  let release;
+  ctx.answers.nearest = () =>
+    new Promise((resolve) => {
+      release = () => resolve(fail('incorrect_api_key'));
+    });
+  const first = ctx.app.start(config);
+  await flush();
+  // The user saves a new key while the first call is in flight.
+  ctx.answers.nearest = () => json(fixture('nearest_city.json'));
+  const second = ctx.app.start({ api_key: 'NEW-KEY' });
+  release();
+  await first;
+  await second;
+  assert.equal(ctx.client.keyState, 'ok');
+  assert.equal(ctx.gladys.fake.connectionStatus.connected, true);
+  assert.equal(calls(API).at(-1).params.key, 'NEW-KEY');
+  // A call queued with the old key never goes.
+  await assert.rejects(ctx.client.nearestCity(1, 2, { apiKey: KEY }), {
+    detail: 'configuration changed',
+  });
+});
+
+test('the test button answers within its deadline, with the last values', async () => {
+  const ctx = await setup();
+  const before = calls(API).length;
+  // AirVisual never answers this time.
+  ctx.answers.nearest = () => new Promise(() => {});
+  const pending = ctx.app.testConnection();
+  await flush();
+  assert.equal(calls(API).length, before + 1);
+  const [deadline] = [...ctx.timers.pending.values()].filter((t) => t.kind === 'timeout');
+  assert.equal(deadline.ms, 100_000, 'answered before the 120 s Gladys waits');
+  await ctx.timers.runTimeouts();
+  const answer = await pending;
+  assert.match(answer.en, /- AirVisual Home: AQI US 42/);
+});
+
+test('secrets are scrubbed whatever their case; a refused node link says so', async () => {
+  const ctx = await setup({ start: false });
+  ctx.answers.node = () => json({ status: 'fail', data: { message: 'Forbidden' } }, 401);
+  await ctx.app.start({ api_key: KEY, node_ids: NODE_ID });
+  assert.equal(
+    ctx.app.scrub(new Error(`echo ${KEY.toLowerCase()} ${NODE_ID.toUpperCase()}`)),
+    'echo *** ***',
+  );
+  assert.match(ctx.gladys.fake.connectionStatus.message.en, /link refused \(check the id\)/);
+  assert.equal(ctx.client.keyState, 'ok', 'a node refusal is not the key');
 });

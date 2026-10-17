@@ -15,6 +15,8 @@ import {
   FAILED_RETRY,
   HEARTBEAT,
   MAX_LOCATIONS,
+  NOT_FOUND_RETRY,
+  TEST_DEADLINE,
   TICK,
 } from './constants.js';
 import { T, reason } from './i18n.js';
@@ -71,10 +73,10 @@ export class AirVisualApp {
     this.started = true;
     // A reconnection to Gladys gives the same configuration: the pauses (429),
     // the refusal of the key and the due times stay. A new key starts afresh.
+    // The client keeps the state of the same key (also across a restart of
+    // the container, from /data) and starts afresh for another one.
     const newKey = previous && previous.apiKey !== this.config.apiKey;
-    if (newKey) {
-      this.client.reset();
-    }
+    this.client.useKey(this.config.apiKey);
     if (newKey || (previous && previous.pollMinutes !== this.config.pollMinutes)) {
       for (const [key, entry] of this.track) {
         if (!key.startsWith(`${DEVICE_TYPES.NODE}:`)) {
@@ -114,7 +116,9 @@ export class AirVisualApp {
     const secrets = [this.config.apiKey, ...this.config.nodes.map((n) => n.id)];
     for (const secret of secrets) {
       if (secret) {
-        message = message.split(secret).join('***');
+        // Without regard to case: an echo may come back lower-cased.
+        const pattern = new RegExp(secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+        message = message.replace(pattern, '***');
       }
     }
     return message;
@@ -198,12 +202,24 @@ export class AirVisualApp {
 
   /** Read what is due, one source at a time (a tick never overlaps another). */
   tick() {
-    if (!this.ticking) {
-      this.ticking = this.readDue().finally(() => {
-        this.ticking = undefined;
-      });
+    if (this.ticking && this.tickGeneration === this.generation) {
+      return this.ticking;
     }
-    return this.ticking;
+    // A tick of a previous configuration still running: this one follows it
+    // (it stops at its next source), never runs alongside.
+    const previous = this.ticking ?? Promise.resolve();
+    const generation = this.generation;
+    const run = previous
+      .catch(() => {})
+      .then(() => this.readDue())
+      .finally(() => {
+        if (this.ticking === run) {
+          this.ticking = undefined;
+        }
+      });
+    this.ticking = run;
+    this.tickGeneration = generation;
+    return run;
   }
 
   async readDue() {
@@ -235,6 +251,9 @@ export class AirVisualApp {
       if (err.kind === 'budget') {
         return this.client.budget.resetsAt();
       }
+      if (err.kind === 'not_found' || err.kind === 'no_station' || err.kind === 'denied') {
+        return now + NOT_FOUND_RETRY;
+      }
       if (source.type === DEVICE_TYPES.NODE && err.kind === 'limited') {
         return Math.max(now + 60_000, this.client.nodePausedUntil.get(source.key)?.until ?? 0);
       }
@@ -242,7 +261,9 @@ export class AirVisualApp {
     const interval =
       (source.type === DEVICE_TYPES.NODE ? this.config.nodePollMinutes : this.locationInterval()) *
       60_000;
-    return now + Math.min(interval, FAILED_RETRY);
+    // A passing failure (network, 5xx) never makes a source read faster than
+    // its interval: a long outage must not drain the daily budget.
+    return now + Math.max(interval, FAILED_RETRY);
   }
 
   async fetch(source, { force = false, reserve = true } = {}) {
@@ -276,6 +297,16 @@ export class AirVisualApp {
       }
       entry.reading = { ...reading, source };
       entry.error = undefined;
+      // The key works again (after a refusal or a 429): the locations that
+      // waited for it are due now, not hours later.
+      if (source.type !== DEVICE_TYPES.NODE) {
+        for (const other of this.locations()) {
+          const waiting = this.track.get(keyOf(other));
+          if (other !== source && ['refused', 'limited'].includes(waiting?.error?.kind)) {
+            waiting.nextDue = Math.min(waiting.nextDue, this.now());
+          }
+        }
+      }
       const minutes =
         source.type === DEVICE_TYPES.NODE ? this.config.nodePollMinutes : this.locationInterval();
       entry.nextDue = this.now() + minutes * 60_000;
@@ -482,11 +513,31 @@ export class AirVisualApp {
     return `- ${source.name}${colon} ${parts.join(', ')}`;
   }
 
+  /** Read a source, but stop waiting at `deadline`. */
+  async readBefore(source, deadline, options) {
+    const left = deadline - this.now();
+    if (left <= 0) {
+      return;
+    }
+    let timer;
+    const timeout = new Promise((resolve) => {
+      timer = this.timers.setTimeout(resolve, left);
+    });
+    try {
+      await Promise.race([this.read(source, options), timeout]);
+    } finally {
+      this.timers.clearTimeout(timer);
+    }
+  }
+
   async testConnection() {
     const { config } = this;
     if (!config.apiKey && config.nodes.length === 0) {
       return this.withNotes(T.notConfigured);
     }
+    // Gladys waits 120 s for the answer: past ~100 s, the last values are
+    // shown (a read still running finishes in the background).
+    const deadline = this.now() + TEST_DEADLINE;
     const en = [];
     const fr = [];
     const locations = this.locations();
@@ -498,7 +549,7 @@ export class AirVisualApp {
       // One call checks the key: the other locations show their last reading,
       // the quota is too small to read them all on every click.
       const [first] = locations;
-      await this.read(first, { force: true, reserve: false });
+      await this.readBefore(first, deadline, { force: true, reserve: false });
       const issue = this.keyIssue();
       if (issue) {
         en.push(issue.en);
@@ -520,7 +571,7 @@ export class AirVisualApp {
       en.push('AirVisual Pro:');
       fr.push('AirVisual Pro :');
       for (const source of nodes) {
-        await this.read(source);
+        await this.readBefore(source, deadline);
         en.push(this.line(source, 'en'));
         fr.push(this.line(source, 'fr'));
       }

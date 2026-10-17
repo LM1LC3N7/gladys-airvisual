@@ -6,7 +6,9 @@
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { AirVisualClient, checkAnswer } from '../src/airvisual.js';
-import { Budget, memoryStorage } from '../src/budget.js';
+import { readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { Budget, fileStorage, memoryStorage } from '../src/budget.js';
 import { DAILY_CALLS, LIMITED_MAX } from '../src/constants.js';
 import { getJson } from '../src/http.js';
 import { FIXTURE_NOW, fail, fixture, installFetch, json } from './helpers/fakes.js';
@@ -133,7 +135,9 @@ test('the daily budget: periodic reads keep a reserve, the count survives a rest
   // The test button may use the reserve.
   await client.nearestCity(1, 2, { ...KEY, reserve: false });
   assert.equal(fake.calls.length, 2);
-  assert.deepEqual(storage.load(), { day: '2026-10-17', count: DAILY_CALLS - 19 });
+  const saved = storage.load();
+  assert.deepEqual([saved.day, saved.count], ['2026-10-17', DAILY_CALLS - 19]);
+  assert.ok(!JSON.stringify(saved).includes('SECRET-KEY-1'), 'the key itself is never saved');
   const again = new Budget({ storage, now: () => clock.now });
   assert.equal(again.used(), DAILY_CALLS - 19);
   // A new UTC day opens it again.
@@ -185,4 +189,71 @@ test('bodies are bounded, errors carry the host only', async () => {
     assert.equal(err.message, 'network ENOTFOUND on api.airvisual.com');
     return true;
   });
+});
+
+test('no redirection is followed for the API; a node one only to the known hosts', async () => {
+  let target = 'https://evil.example/steal';
+  const { client } = clientWith([
+    [
+      /\/v2\/nearest_city/,
+      (c) => {
+        assert.equal(c.init.redirect, 'error');
+        return json(fixture('nearest_city.json'));
+      },
+    ],
+    [
+      /^https:\/\/www\.airvisual\.com\/api\/v2\/node\/abcdef123456$/,
+      (c) => {
+        assert.equal(c.init.redirect, 'manual');
+        return new Response('', { status: 302, headers: { location: target } });
+      },
+    ],
+    [/^https:\/\/device\.iqair\.com\/v2\/abcdef123456$/, () => json(fixture('node_iqair.json'))],
+  ]);
+  await client.nearestCity(1, 2, KEY);
+  const node = { id: 'abcdef123456', host: 'airvisual', hash: 'h1' };
+  await assert.rejects(client.node(node), { kind: 'failed', detail: 'redirection refused' });
+  target = 'http://device.iqair.com/v2/abcdef123456';
+  await assert.rejects(client.node(node), { detail: 'redirection refused' });
+  target = 'https://device.iqair.com/v2/abcdef123456';
+  assert.equal((await client.node(node)).name, 'Bedroom');
+});
+
+test('only known AirVisual codes reach a message', () => {
+  const echo = checkAnswer({
+    status: 400,
+    body: { status: 'fail', data: { message: 'bad key ABC123xyz' } },
+  });
+  assert.equal(echo.kind, 'failed');
+  assert.equal(echo.detail, 'api error');
+  assert.ok(!echo.message.toLowerCase().includes('abc123xyz'));
+  const refused = checkAnswer({ status: 401, body: 'Unauthorized ABC123xyz' });
+  assert.equal(refused.kind, 'refused');
+  assert.equal(refused.detail, 'http 401');
+});
+
+test('the budget file: atomic writes, a corrupt file assumed half spent, one warning', () => {
+  const dir = fileURLToPath(new URL('../data/test-budget/', import.meta.url));
+  rmSync(dir, { recursive: true, force: true });
+  const path = `${dir}budget.json`;
+  const warnings = [];
+  const logger = { warn: (m) => warnings.push(m) };
+  try {
+    const now = () => FIXTURE_NOW;
+    // A first start: no file, nothing spent.
+    assert.equal(new Budget({ storage: fileStorage(path, { logger }), now }).used(), 0);
+    const budget = new Budget({ storage: fileStorage(path, { logger }), now });
+    budget.take();
+    assert.deepEqual(readdirSync(dir), ['budget.json'], 'no .tmp file left behind');
+    assert.equal(new Budget({ storage: fileStorage(path, { logger }), now }).used(), 1);
+    writeFileSync(path, '{ not json SECRET');
+    const storage = fileStorage(path, { logger });
+    const prudent = new Budget({ storage, now });
+    assert.equal(prudent.used(), Math.floor(DAILY_CALLS / 2));
+    storage.load();
+    assert.equal(warnings.length, 1, 'warned once');
+    assert.ok(!warnings[0].includes('SECRET'), 'never the content');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

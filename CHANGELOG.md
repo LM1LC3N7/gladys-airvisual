@@ -22,8 +22,11 @@ the notes of the version's GitHub Release.
   and humidity.
 - Kept under the free "Community" plan: each location read every 30 minutes
   by default, the interval raised when the locations would not fit, never two
-  calls less than 13 seconds apart, at most 290 calls per UTC day, counted
-  across restarts.
+  calls less than 13 seconds apart, at most 290 calls per UTC day; a failed
+  read never retried faster than its interval (a city not found: every 6
+  hours). The count, the spacing, the 429 pause and the refusal of the key
+  survive a restart (kept under `/data` with a hash of the key, never the
+  key).
 - A 429 from AirVisual pauses every call with the key, the test button
   included (Retry-After, else 1 minute or 1 hour doubling, between 1 minute
   and 6 hours); a refused key stops the reads and says so, with one new try

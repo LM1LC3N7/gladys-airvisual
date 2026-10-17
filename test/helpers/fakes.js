@@ -57,6 +57,13 @@ export function createFakeTimers() {
     clearTimeout: (id) => pending.delete(id),
     clearInterval: (id) => pending.delete(id),
     intervals: () => [...pending.values()].filter((t) => t.kind === 'interval'),
+    /** Fire (and remove) every pending timeout once. */
+    async runTimeouts() {
+      for (const t of [...pending.values()].filter((t) => t.kind === 'timeout')) {
+        pending.delete(t.id);
+        await t.fn();
+      }
+    },
     async runIntervals() {
       for (const t of [...pending.values()].filter((t) => t.kind === 'interval')) {
         await t.fn();
@@ -64,6 +71,13 @@ export function createFakeTimers() {
     },
   };
 }
+
+/** Let the promises started by a call settle. */
+export const flush = async (rounds = 5) => {
+  for (let i = 0; i < rounds; i += 1) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+};
 
 export const quiet = {
   info() {},

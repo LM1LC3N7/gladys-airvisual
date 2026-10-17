@@ -76,11 +76,12 @@ test('five nodes at most', () => {
 test('the interval of the locations never drains the free plan', () => {
   assert.equal(effectiveInterval(30, 1), 30);
   assert.equal(effectiveInterval(10, 1), 10);
-  // 5 locations every 10 minutes would be 720 calls a day: raised to 27 min.
-  assert.equal(effectiveInterval(10, 5), 27);
+  // 5 locations every 10 minutes would be 720 calls a day: raised to 28 min.
+  assert.equal(effectiveInterval(10, 5), 28);
   for (let n = 1; n <= 5; n += 1) {
     for (const minutes of [10, 15, 30, 60]) {
-      const perDay = (n * 24 * 60) / effectiveInterval(minutes, n);
+      // The first read of the day at 00:00 UTC, then one per interval.
+      const perDay = n * (Math.floor((24 * 60) / effectiveInterval(minutes, n)) + 1);
       assert.ok(perDay <= 270, `${n} locations every ${minutes} min: ${perDay} calls a day`);
       assert.ok(perDay * 31 <= 10_000 - 31 * 20, 'under the monthly quota with the reserve');
     }

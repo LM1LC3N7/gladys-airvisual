@@ -6,9 +6,10 @@
 
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-export function createPacer(gap, { now = Date.now, sleep = defaultSleep } = {}) {
+export function createPacer(gap, { now = Date.now, sleep = defaultSleep, last: initial } = {}) {
   let tail = Promise.resolve();
-  let last = -Infinity;
+  // The last call before a restart, so the spacing holds across it.
+  let last = Number.isFinite(initial) ? Math.min(initial, now()) : -Infinity;
   return function pace(task) {
     const run = tail.then(async () => {
       const wait = last + gap - now();

@@ -49,13 +49,17 @@ et les valeurs de vos moniteurs **AirVisual Pro**, lues par leur lien cloud.
 - **Qualité de l'air des maisons** (activée par défaut) : un lieu par maison
   qui a une position dans Gladys (Paramètres → Maisons). La position,
   arrondie à 2 décimales (1 km environ), est envoyée à AirVisual, qui répond
-  avec sa ville la plus proche.
+  avec sa ville la plus proche. Les positions ne sont relues qu'au démarrage
+  de l'intégration, à sa reconnexion à Gladys ou à l'enregistrement de sa
+  configuration ; la ville la plus proche selon AirVisual peut changer avec
+  le temps (une station ferme, une autre ouvre) sous le même appareil Gladys.
 - **Villes** : écrites comme AirVisual les écrit, `Ville, Région, Pays`,
   séparées par `;`, par exemple
   `Paris, Ile-de-France, France; Lyon, Auvergne-Rhone-Alpes, France`. Une
-  mauvaise orthographe donne « introuvable » dans l'état ; l'orthographe
-  d'AirVisual est celle de son site (iqair.com), en anglais et sans accents
-  le plus souvent. **Cinq lieux au maximum**, maisons comprises.
+  mauvaise orthographe donne « introuvable » dans l'état (et n'est réessayée
+  que toutes les 6 heures) ; l'orthographe est celle d'iqair.com : en
+  anglais, le plus souvent sans accents. **Cinq lieux au maximum**, maisons
+  comprises.
 - **Intervalle de lecture de chaque lieu** (30 minutes par défaut, de 10 à
   360).
 - **Identifiants des AirVisual Pro** : sur le tableau de bord IQAir, ouvrez
@@ -66,8 +70,9 @@ et les valeurs de vos moniteurs **AirVisual Pro**, lues par leur lien cloud.
   L'identifiant donne accès aux valeurs du moniteur : c'est un champ secret,
   jamais réaffiché, saisissez donc la liste entière pour la changer. Dans
   Gladys, un moniteur est connu par une empreinte de son identifiant, jamais
-  par l'identifiant lui-même. Aucune clé d'API n'est nécessaire pour les
-  moniteurs.
+  par l'identifiant lui-même. La clé d'API n'est pas envoyée aux liens des
+  moniteurs (pyairvisual l'envoie ; qu'un lien en ait besoin n'est pas encore
+  vérifié) : si un lien refuse l'appel, l'état indique « lien refusé ».
 - **Intervalle de lecture des AirVisual Pro** (10 minutes par défaut, de 5 à
   60).
 
@@ -88,7 +93,10 @@ configuration :
   lectures périodiques s'arrêtent à 270 et en gardent 20 pour le bouton de
   test. Au-delà, les lectures reprennent après minuit UTC ;
 - l'intervalle est relevé de lui-même si les lieux ne tiennent pas : cinq
-  lieux sont lus toutes les 27 minutes au moins.
+  lieux sont lus toutes les 28 minutes au moins ;
+- une lecture en échec (réseau, erreur du serveur) est réessayée à
+  l'intervalle habituel, jamais plus tôt ; une ville introuvable ou aucune
+  ville à proximité, toutes les 6 heures.
 
 | Lieux | Intervalle par défaut | Appels par jour | Appels par mois |
 | ----- | --------------------- | --------------- | --------------- |
@@ -100,23 +108,33 @@ Quand AirVisual répond **429** (« call limit reached » ou « too many
 requests »), tous les appels avec la clé s'arrêtent, bouton de test compris :
 le délai `Retry-After` si AirVisual en donne un, sinon 1 minute pour « too
 many requests » et 1 heure, puis le double à chaque fois, pour « call limit
-reached » ; toujours entre 1 minute et 6 heures. Une pause survit à une
-reconnexion à Gladys.
+reached » ; toujours entre 1 minute et 6 heures.
 
 Quand AirVisual **refuse la clé** (erronée, expirée, sans accès), les
 lectures avec la clé s'arrêtent et l'état le dit ; un nouvel essai toutes les
 6 heures (le bouton de test peut essayer tout de suite), jusqu'à ce que vous
-changiez la clé. Les AirVisual Pro continuent d'être lus.
+changiez la clé. Dès qu'un appel réussit de nouveau, les autres lieux sont
+lus aussitôt. Les AirVisual Pro continuent d'être lus.
 
-Les liens des AirVisual Pro n'utilisent pas la clé d'API ; ils sont lus à
-leur propre intervalle, un appel à la fois, à 2 secondes d'écart.
+La pause, le refus et l'écart de 13 secondes survivent à une reconnexion à
+Gladys et à un redémarrage du conteneur (gardés dans le même fichier sous
+`/data`, avec une empreinte de la clé, jamais la clé elle-même) ; une
+nouvelle clé repart de zéro. Un fichier illisible est compté comme la moitié
+du budget du jour consommée.
+
+Les liens des AirVisual Pro sont lus sans la clé d'API, à leur propre
+intervalle, un appel à la fois, à 2 secondes d'écart ; une redirection n'est
+suivie que vers les deux adresses AirVisual ci-dessus, en HTTPS.
 
 ## Dépannage
 
 - **« AirVisual a refusé la clé d'API »** : vérifiez la clé sur le tableau de
   bord IQAir ; une clé Community expire au bout d'un an et se renouvelle là.
 - **« introuvable »** à côté d'une ville : vérifiez son orthographe (ville,
-  région, pays, en anglais, comme sur iqair.com).
+  région, pays, comme sur iqair.com : en anglais, le plus souvent sans
+  accents).
+- **« lien refusé »** à côté d'un moniteur : vérifiez son identifiant sur le
+  tableau de bord IQAir.
 - **« aucune ville à proximité »** : AirVisual n'a pas de ville assez proche
   de la position de la maison ; saisissez une ville à la place.
 - **« Le budget d'appels du jour du plan gratuit est épuisé »** : un autre

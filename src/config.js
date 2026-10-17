@@ -33,7 +33,7 @@ const clean = (value) => String(value ?? '').trim();
 export function slug(text) {
   return String(text)
     .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');

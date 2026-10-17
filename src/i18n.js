@@ -12,6 +12,10 @@ export const REASONS = {
   refused: { en: 'API key refused', fr: "clé d'API refusée" },
   limited: { en: 'too many calls (429)', fr: "trop d'appels (429)" },
   budget: { en: 'daily budget spent', fr: 'budget du jour épuisé' },
+  denied: {
+    en: 'link refused (check the id)',
+    fr: "lien refusé (vérifiez l'identifiant)",
+  },
   not_found: { en: 'not found', fr: 'introuvable' },
   no_station: { en: 'no city nearby', fr: 'aucune ville à proximité' },
   failed: { en: 'no answer', fr: 'pas de réponse' },

@@ -49,13 +49,16 @@ link.
 - **Air quality of the houses** (on by default): one location per house that
   has a position in Gladys (Settings → Houses). The position, rounded to 2
   decimals (about 1 km), is sent to AirVisual, which answers with its nearest
-  city.
+  city. The positions are read again only when the integration starts,
+  reconnects to Gladys or its configuration is saved; AirVisual's nearest
+  city may change over time (a station closes, another opens) while the
+  device in Gladys stays the same.
 - **Cities**: written as AirVisual writes them, `City, State, Country`,
   separated by `;`, for example
   `Paris, Ile-de-France, France; Lyon, Auvergne-Rhone-Alpes, France`. A wrong
-  spelling gives "not found" in the status; the spelling AirVisual uses is the
-  one of its website (iqair.com) and of its `states` / `cities` lists.
-  **Five locations at most**, houses included.
+  spelling gives "not found" in the status (and is tried again only every 6
+  hours); the spelling is the one of iqair.com: in English, usually without
+  accents. **Five locations at most**, houses included.
 - **Read interval of each location** (30 minutes by default, 10 to 360).
 - **AirVisual Pro ids**: on the IQAir dashboard, open the monitor and copy
   the id of its API link (or the whole link,
@@ -64,7 +67,9 @@ link.
   Separate several with commas, five at most. The id gives access to the
   values of the monitor: it is a secret field, never shown again, so enter
   the whole list to change it. In Gladys, a monitor is known by a hash of its
-  id, never by the id itself. No API key is needed for the monitors.
+  id, never by the id itself. The API key is not sent to the monitor links
+  (pyairvisual sends it; whether a link needs it is not verified yet): if a
+  link refuses the call, the status says "link refused".
 - **Read interval of the AirVisual Pro** (10 minutes by default, 5 to 60).
 
 ## Usage limits (free "Community" plan)
@@ -82,7 +87,9 @@ minute. The integration stays below, whatever the configuration:
   keep 20 for the test button. Past that, the reads resume after midnight
   UTC;
 - the interval is raised automatically when the locations would not fit:
-  five locations are read every 27 minutes at least.
+  five locations are read every 28 minutes at least;
+- a failed read (network, server error) is tried again at the usual
+  interval, never sooner; a city not found or no city nearby, every 6 hours.
 
 | Locations | Default interval | Calls a day | Calls a month |
 | --------- | ---------------- | ----------- | ------------- |
@@ -94,22 +101,30 @@ When AirVisual answers **429** ("call limit reached" or "too many
 requests"), every call with the key pauses, the test button included: the
 `Retry-After` delay if AirVisual gives one, otherwise 1 minute for "too many
 requests" and 1 hour, doubling, for "call limit reached"; always between 1
-minute and 6 hours. A pause survives a reconnection to Gladys.
+minute and 6 hours.
 
 When AirVisual **refuses the key** (wrong, expired, without access), the
 reads with the key stop and the status says so; one new try every 6 hours
-(the test button may try at once), until you change the key. The AirVisual
-Pro monitors keep being read.
+(the test button may try at once), until you change the key. As soon as a
+call works again, the other locations are read at once. The AirVisual Pro
+monitors keep being read.
 
-The AirVisual Pro links do not use the API key; they are read at their own
-interval, one call at a time, 2 seconds apart.
+The pause, the refusal and the 13-second spacing survive a reconnection to
+Gladys and a restart of the container (they are kept in the same file under
+`/data`, with a hash of the key, never the key itself); a new key starts
+afresh. An unreadable file is taken as half of the day's budget spent.
+
+The AirVisual Pro links are read without the API key, at their own
+interval, one call at a time, 2 seconds apart; a redirection is followed
+only to the two AirVisual hosts above, in HTTPS.
 
 ## Troubleshooting
 
 - **"AirVisual refused the API key"**: check the key on the IQAir dashboard;
   a Community key expires after a year and must be renewed there.
 - **"not found"** next to a city: check its spelling (city, state, country,
-  in English, as on iqair.com).
+  as on iqair.com: in English, usually without accents).
+- **"link refused"** next to a monitor: check its id on the IQAir dashboard.
 - **"no city nearby"**: AirVisual has no city close enough to the position
   of the house; enter a city instead.
 - **"The daily call budget of the free plan is spent"**: another tool may use

@@ -6,7 +6,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { createFakeGladys } from '@gladysassistant/integration-sdk/testing';
 import { ACTIONS, DEVICE_TYPES } from '../src/constants.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
@@ -45,8 +45,12 @@ test('no mojibake and no BOM in the manifest and the docs', () => {
     'TODO.md',
     'CLAUDE.md',
     'THIRD_PARTY_NOTICES.md',
-    'src/i18n.js',
+    'index.js',
+    ...readdirSync(new URL('../src/', import.meta.url))
+      .filter((name) => name.endsWith('.js'))
+      .map((name) => `src/${name}`),
   ];
+  assert.ok(files.length > 15, 'every source file is checked');
   for (const file of files) {
     const buffer = readBuffer(file);
     assert.ok(
@@ -58,6 +62,8 @@ test('no mojibake and no BOM in the manifest and the docs', () => {
     for (const bad of ['Ã', 'Â', 'â€']) {
       assert.ok(!text.includes(bad), `${file} holds mojibake (${bad})`);
     }
+    // Combining marks only as \u escapes (a regex class of them is invisible).
+    assert.doesNotMatch(text, /[\u0300-\u036f]/, `${file} holds a bare combining mark`);
   }
   // The French texts really hold their accents.
   assert.match(read('docs/fr.md'), /é/);

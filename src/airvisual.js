@@ -6,9 +6,11 @@
 //
 // Every guard of the API key lives here, so no path can skip one: the pace
 // (13 s between calls), the daily budget, the pause after a 429 and the stop
-// after a refused key.
+// after a refused key. They are persisted with the budget, so a restart
+// keeps them.
 // -----------------------------------------------------------------------------
 
+import { createHash } from 'node:crypto';
 import {
   API_MIN_GAP,
   API_URL,
@@ -17,6 +19,8 @@ import {
   LIMITED_QUOTA_BASE,
   MAX_API_BODY,
   MAX_NODE_BODY,
+  MAX_REDIRECTS,
+  NODE_HOSTNAMES,
   NODE_HOSTS,
   NODE_MIN_GAP,
   REFUSED_BACKOFF,
@@ -26,9 +30,10 @@ import { getJson } from './http.js';
 import { createPacer } from './pacer.js';
 
 /**
- * kind: refused (the key), limited (429), budget (the daily budget is
- * spent), not_found (city or node), no_station (no city near the
- * coordinates), failed (anything else). `detail` is safe to show.
+ * kind: refused (the key), denied (a node link refused), limited (429),
+ * budget (the daily budget is spent), not_found (city or node), no_station
+ * (no city near the coordinates), failed (anything else). `detail` is one
+ * of the known AirVisual codes or a fixed text: safe to show.
  */
 export class AirVisualError extends Error {
   constructor(kind, detail = kind, { retryAfterMs, quota = false } = {}) {
@@ -44,6 +49,15 @@ export class AirVisualError extends Error {
 
 const REFUSED = ['incorrect_api_key', 'api_key_expired', 'payment required', 'permission_denied'];
 const REFUSED_403 = ['forbidden', 'feature_not_available'];
+const KNOWN = [
+  ...REFUSED,
+  ...REFUSED_403,
+  'call_limit_reached',
+  'too_many_requests',
+  'city_not_found',
+  'node not found',
+  'no_nearest_station',
+];
 
 /** The error message of an AirVisual answer, lower case, or ''. */
 export function messageOf(body) {
@@ -52,8 +66,9 @@ export function messageOf(body) {
   return typeof raw === 'string' ? raw.replace(/"/g, '').trim().toLowerCase().slice(0, 200) : '';
 }
 
-/** A message reduced to what is safe to show: letters, digits, spaces, _ and -. */
-const safe = (message) => message.replace(/[^a-z0-9 _-]/g, '').slice(0, 60) || 'unknown';
+/** Only a known AirVisual code is shown; anything else (an echo...) is not. */
+const safe = (message, fallback = 'api error') =>
+  KNOWN.find((code) => message.includes(code)) ?? fallback;
 
 /** An AirVisual answer -> its data, or the AirVisualError it means. */
 export function checkAnswer({ status, body, retryAfterMs }) {
@@ -69,7 +84,7 @@ export function checkAnswer({ status, body, retryAfterMs }) {
     return new AirVisualError('limited', 'too_many_requests', { retryAfterMs });
   }
   if (REFUSED.some((m) => message.includes(m)) || status === 401) {
-    return new AirVisualError('refused', safe(message || `http ${status}`));
+    return new AirVisualError('refused', safe(message, `http ${status}`));
   }
   // A 403 is the key only when AirVisual says so; a bare 403 (a proxy, a CDN)
   // is a passing failure.
@@ -85,29 +100,97 @@ export function checkAnswer({ status, body, retryAfterMs }) {
   if (status >= 200 && status < 300 && !isFail) {
     return new AirVisualError('failed', 'unexpected answer');
   }
-  return new AirVisualError('failed', isFail ? safe(message) : `http ${status}`);
+  return new AirVisualError('failed', isFail ? safe(message) : `http ${Number(status) || 0}`);
 }
 
 const clamp = (ms, min, max) => Math.min(max, Math.max(min, ms));
 
+/** A truncated SHA-256 of the key: what is persisted, never the key. */
+export const keyHash = (apiKey) =>
+  apiKey ? createHash('sha256').update(apiKey).digest('hex').slice(0, 16) : '';
+
+/** A node link or redirection target: https, one of the two known hosts. */
+const allowedNodeUrl = (url) => url.protocol === 'https:' && NODE_HOSTNAMES.includes(url.hostname);
+
 export class AirVisualClient {
   constructor({ now = Date.now, sleep, storage } = {}) {
     this.now = now;
-    this.paceApi = createPacer(API_MIN_GAP, { now, sleep });
-    this.paceNode = createPacer(NODE_MIN_GAP, { now, sleep });
     this.budget = new Budget({ storage, now });
-    this.reset();
-    /** node hash -> instant before which the node is not read (its 429). */
+    const saved = this.budget.saved;
+    this.lastCallAt = Number.isFinite(saved.lastCallAt) ? saved.lastCallAt : undefined;
+    this.paceApi = createPacer(API_MIN_GAP, { now, sleep, last: this.lastCallAt });
+    this.paceNode = createPacer(NODE_MIN_GAP, { now, sleep });
+    /** The key state saved before a restart, applied by useKey() if the key matches. */
+    this.savedKey = saved.key && typeof saved.key === 'object' ? saved.key : undefined;
+    this.keyEpoch = 0;
+    this.currentKeyHash = undefined;
+    this.clearKeyState();
+    /** node hash -> { until, error }: the 429 pause of a node. */
     this.nodePausedUntil = new Map();
   }
 
-  /** A new key: no refusal, no pause carried over (the budget stays). */
-  reset() {
+  clearKeyState() {
     /** ok | refused | limited, for the API key. */
     this.keyState = 'ok';
     this.keyPausedUntil = 0;
     this.keyError = undefined;
     this.limitedStreak = 0;
+  }
+
+  /** A new key: no refusal, no pause carried over (the budget stays). */
+  reset() {
+    this.keyEpoch += 1;
+    this.clearKeyState();
+    this.persist();
+  }
+
+  /**
+   * The key of the configuration. The same key keeps its state (and, after
+   * a restart, gets back the state saved for it); another key starts afresh.
+   */
+  useKey(apiKey) {
+    const hash = keyHash(apiKey);
+    if (hash === this.currentKeyHash) {
+      return;
+    }
+    const firstUse = this.currentKeyHash === undefined;
+    this.currentKeyHash = hash;
+    const saved = this.savedKey;
+    this.savedKey = undefined;
+    this.keyEpoch += 1;
+    this.clearKeyState();
+    if (firstUse && saved?.hash && saved.hash === hash && this.now() < saved.pausedUntil) {
+      if (saved.state === 'refused') {
+        this.keyState = 'refused';
+        this.keyError = new AirVisualError('refused', 'refused before a restart');
+      } else if (saved.state === 'limited') {
+        this.keyState = 'limited';
+        this.keyError = new AirVisualError('limited', 'call_limit_reached', { quota: true });
+      }
+      if (this.keyError) {
+        this.keyPausedUntil = Number(saved.pausedUntil);
+        this.limitedStreak = Number.isInteger(saved.streak) ? saved.streak : 0;
+      }
+    }
+    this.persist();
+  }
+
+  persist() {
+    this.syncExtra();
+    this.budget.save();
+  }
+
+  /** The state of the key, as the budget file keeps it next to the count. */
+  syncExtra() {
+    this.budget.extra = {
+      lastCallAt: this.lastCallAt,
+      key: {
+        hash: this.currentKeyHash ?? this.savedKey?.hash ?? '',
+        state: this.keyState,
+        pausedUntil: this.keyPausedUntil,
+        streak: this.limitedStreak,
+      },
+    };
   }
 
   /** How long the next 429 pauses: Retry-After, else 60 s or 1 h doubling. */
@@ -134,7 +217,16 @@ export class AirVisualClient {
   }
 
   async callApi(endpoint, params, { apiKey, force = false, reserve = true }) {
+    if (this.currentKeyHash === undefined) {
+      this.useKey(apiKey);
+    }
+    const epoch = this.keyEpoch;
+    const stale = () => new AirVisualError('failed', 'configuration changed');
     return this.paceApi(async (sent) => {
+      // A call queued with a key the configuration no longer holds never goes.
+      if (epoch !== this.keyEpoch || keyHash(apiKey) !== this.currentKeyHash) {
+        throw stale();
+      }
       // Checked when the turn comes, not when queued: a 429 met by the
       // previous call stops this one before the network.
       const blocked = this.keyBlocked({ force, reserve });
@@ -146,15 +238,22 @@ export class AirVisualClient {
         url.searchParams.set(name, String(value));
       }
       url.searchParams.set('key', apiKey);
+      this.lastCallAt = this.now();
+      this.syncExtra();
       this.budget.take();
       sent();
-      const answer = await getJson(url.href, { maxBytes: MAX_API_BODY });
+      const answer = await getJson(url.href, { maxBytes: MAX_API_BODY, redirect: 'error' });
+      // The key changed while the call was in flight: its outcome is not the
+      // new key's.
+      if (epoch !== this.keyEpoch) {
+        throw stale();
+      }
       const result = checkAnswer(answer);
       if (!(result instanceof AirVisualError)) {
-        this.keyState = 'ok';
-        this.keyPausedUntil = 0;
-        this.keyError = undefined;
-        this.limitedStreak = 0;
+        if (this.keyState !== 'ok' || this.limitedStreak !== 0) {
+          this.clearKeyState();
+          this.persist();
+        }
         return result;
       }
       if (result.kind === 'limited') {
@@ -166,6 +265,7 @@ export class AirVisualClient {
         this.keyPausedUntil = this.now() + REFUSED_BACKOFF;
         this.keyError = result;
       }
+      this.persist();
       throw result;
     });
   }
@@ -188,7 +288,29 @@ export class AirVisualClient {
     return this.callApi('city', { city, state, country }, { apiKey, force, reserve });
   }
 
-  /** An AirVisual Pro / Node by its id (no API key: the id is the credential). */
+  /** GET a node link, following a redirection only to the known https hosts. */
+  async getNode(href) {
+    let url = new URL(href);
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+      const answer = await getJson(url.href, { maxBytes: MAX_NODE_BODY, redirect: 'manual' });
+      if (answer.status < 300 || answer.status >= 400) {
+        return answer;
+      }
+      let next;
+      try {
+        next = answer.location ? new URL(answer.location, url) : undefined;
+      } catch {
+        next = undefined;
+      }
+      if (!next || !allowedNodeUrl(next)) {
+        throw new AirVisualError('failed', 'redirection refused');
+      }
+      url = next;
+    }
+    throw new AirVisualError('failed', 'too many redirections');
+  }
+
+  /** An AirVisual Pro / Node by its id (no API key sent: the id is the credential). */
   node({ id, host, hash }) {
     return this.paceNode(async (sent) => {
       const paused = this.nodePausedUntil.get(hash);
@@ -197,7 +319,7 @@ export class AirVisualClient {
       }
       const url = (NODE_HOSTS[host] ?? NODE_HOSTS.airvisual)(encodeURIComponent(id));
       sent();
-      const answer = await getJson(url, { maxBytes: MAX_NODE_BODY });
+      const answer = await this.getNode(url);
       // A node answer is the bare document (pyairvisual's fixture); the
       // `{ status, data }` envelope of the API is read too.
       const body = answer.body && typeof answer.body === 'object' ? answer.body : undefined;
@@ -216,7 +338,9 @@ export class AirVisualClient {
           this.now() + clamp(error.retryAfterMs ?? LIMITED_MIN, LIMITED_MIN, LIMITED_MAX);
         this.nodePausedUntil.set(hash, { until, error });
       }
-      throw error.kind === 'refused' ? new AirVisualError('not_found', error.detail) : error;
+      // A refusal on a node link is about that link (a wrong id, or a key
+      // the node endpoint would want after all), never about the API key.
+      throw error.kind === 'refused' ? new AirVisualError('denied', error.detail) : error;
     });
   }
 }

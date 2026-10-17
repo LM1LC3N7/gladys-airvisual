@@ -30,7 +30,8 @@ export const MAX_NODE_BODY = 1024 * 1024;
 /**
  * The free "Community" plan: 10 000 calls a month, 500 a day, 5 a minute.
  * The integration keeps to 290 calls per UTC day (290 × 31 = 8 990 a month),
- * of which 20 are kept for the test button and the starts.
+ * The periodic reads (the first read of each location after a start
+ * included) stop at 270; the last 20 are kept for the test button.
  */
 export const DAILY_CALLS = 290;
 export const DAILY_RESERVE = 20;
@@ -54,11 +55,26 @@ export const LIMITED_MAX = 6 * 60 * 60_000;
 /** `call_limit_reached` without Retry-After: 1 hour, doubling, up to 6 hours. */
 export const LIMITED_QUOTA_BASE = 60 * 60_000;
 
-/** A refused key: no call with it for 6 hours (or until the configuration changes). */
+/** A refused key: no call with it for 6 hours (or until the key changes). */
 export const REFUSED_BACKOFF = 6 * 60 * 60_000;
 
-/** A location or node that failed for another reason: tried again after this. */
+/**
+ * A location or node that failed (network, 5xx): tried again at its usual
+ * interval, never sooner than this.
+ */
 export const FAILED_RETRY = 10 * 60_000;
+
+/** A city not found, or no city near a house: tried again after this at least. */
+export const NOT_FOUND_RETRY = 6 * 60 * 60_000;
+
+/** The test button answers within this, with the last values if needed. */
+export const TEST_DEADLINE = 100_000;
+
+/** The hosts a node link may point to, or redirect to (https only). */
+export const NODE_HOSTNAMES = ['www.airvisual.com', 'device.iqair.com'];
+
+/** At most this many redirections of a node link. */
+export const MAX_REDIRECTS = 3;
 
 /** A reading older than this is not published as current. */
 export const STALE_CITY = 3 * 60 * 60_000;

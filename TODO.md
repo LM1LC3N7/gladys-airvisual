@@ -26,12 +26,20 @@
       dashboard shares). Both are read; whether the first one still answers,
       and the exact shape of the second (`p2` as a number or as
       `{ conc, aqius, aqicn }`), are not verified.
+- [ ] Whether a node link needs the API key: pyairvisual sends `key=` on
+      `/node/<id>` too; this integration does not (the key goes only to
+      api.airvisual.com). A refusal on a node link shows "link refused" and
+      never touches the state of the key. If real links need it, decide then
+      (sending it to www.airvisual.com would widen where the key goes).
 - [ ] Whether the node calls count against the key quota: they do not send
       the key, so they should not.
 - [ ] The answer to an expired Community key (`api_key_expired`).
-- [ ] The core lists the PM2.5 / PM10 units as nested arrays
+- [x] The core lists the PM2.5 / PM10 units as nested arrays
       (`[[MICROGRAM_PER_CUBIC_METER]]`) in `DEVICE_FEATURE_UNITS_BY_CATEGORY`:
-      check that the UI shows `microgram-per-cubic-meter` well.
+      closed, no effect on this module (it publishes the plain
+      `microgram-per-cubic-meter` string). The duplicated
+      `MICROGRAM_PER_CUBIC_METER` in the core's PM10 list is noted apart for
+      Louis.
 
 ## Decisions
 
@@ -62,15 +70,40 @@
   where the monitor stands: kept.
 - **Quota guard** (free plan: 10,000 calls a month, 500 a day, 5 a minute):
   default 30 minutes per location; the interval is raised to
-  `ceil(locations × 1440 / 270)` minutes when needed; five locations at most;
-  13 s between calls; a daily cap of 290 calls (8,990 a month) of which 20
-  are kept for the test button, persisted in `/data/airvisual-budget.json`
-  so a restart loop cannot drain the quota (if `/data` is not writable, the
-  count stays in memory and a warning is logged).
+  `ceil(locations × 1440 / (270 − locations))` minutes when needed (the first
+  read of each location at 00:00 UTC counted: 28 min for five); five
+  locations at most; 13 s between calls; a daily cap of 290 calls (8,990 a
+  month) of which 20 are kept for the test button.
+- **Retries (review)**: a passing failure (network, 5xx, unexpected answer)
+  is retried at the usual interval, never sooner
+  (`max(interval, 10 min)`); `city_not_found`, `no_nearest_station` and a
+  refused node link every 6 hours. Simulated over 24 h: one misspelt city
+  and four good ones, or a 12-hour 5xx outage, stay ≤ 270 calls and the good
+  cities are read until midnight.
+- **Persisted state (review)**: `/data/airvisual-budget.json` holds the day,
+  the count, `lastCallAt` (the 13 s spacing), and the key state (state,
+  pause end, 429 streak) with a truncated SHA-256 of the key, never the key.
+  A restart with the same key restores them; another key starts afresh.
+  Written atomically (`.tmp` then rename); an unreadable or corrupt file is
+  warned once (without its content) and taken as half of the day's budget
+  spent; a write failure is warned once, then memory only.
+- **Recovery (review)**: when a call with the key works again after a
+  refusal or a 429, the locations that waited for it are due at once.
+- **Key epoch (review)**: a new key bumps an epoch; a call queued with the
+  old key never goes, and the outcome of a call in flight with it never
+  touches the new key's state. A tick of the previous configuration still
+  running is followed, never run alongside.
 - **The test button reads one location only** (the key check) and shows the
   last values of the others; it may use the reserve, and may retry a refused
-  key at once, never during a 429 pause. Its timeout is 120 s: it can wait
-  its turn behind a tick (13 s per call).
+  key at once, never during a 429 pause. Gladys waits 120 s: past 100 s the
+  button answers with the last values (a read still running finishes in the
+  background).
+- **Redirections (review)**: none followed for api.airvisual.com
+  (`redirect: 'error'`); for a node link, followed manually (3 at most) and
+  only to `https://www.airvisual.com` or `https://device.iqair.com`.
+- **Messages (review)**: an error detail shows only a known AirVisual code
+  (or `http <status>`), never the raw message; the secrets are scrubbed from
+  logs without regard to case.
 - **The Discovery tab never calls AirVisual**: it shows the places already
   read, to keep the quota.
 - **429**: `Retry-After` when given, else 1 minute (`too_many_requests`) or
@@ -85,9 +118,11 @@
   passing failure, not a refusal.
 - **A reconnection to Gladys** (`connected` event) keeps the client, the
   pauses, the refusal and the due times; only a new key (or a new interval)
-  makes the locations due again.
-- **Nodes are independent**: no key, their own pace (2 s) and 429 pause; a
-  node down never blocks the locations and the reverse.
+  makes the locations due again. The house positions are read again only
+  then (start, reconnection, configuration saved); AirVisual's nearest city
+  may change under the same device.
+- **Nodes are independent**: no key sent, their own pace (2 s) and 429
+  pause; a node down never blocks the locations and the reverse.
 - **Node links**: a bare id, or a whole link of the two known hosts only
   (https, `device.iqair.com/v2/<id>` or `www.airvisual.com/api/v2/node/<id>`),
   so no other address can be called. The node ids field is a `secret`: the
