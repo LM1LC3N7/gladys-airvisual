@@ -5,7 +5,7 @@
 
 import { afterEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AirVisualClient, checkAnswer } from '../src/airvisual.js';
+import { AirVisualClient, checkAnswer, keyHash } from '../src/airvisual.js';
 import { readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Budget, fileStorage, memoryStorage } from '../src/budget.js';
@@ -255,5 +255,23 @@ test('the budget file: atomic writes, a corrupt file assumed half spent, one war
     assert.ok(!warnings[0].includes('SECRET'), 'never the content');
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a pause read back from /data is never longer than a fresh one', () => {
+  const far = FIXTURE_NOW + 365 * 24 * 60 * 60_000;
+  for (const [state, longest] of [
+    ['limited', LIMITED_MAX],
+    ['refused', 6 * 60 * 60_000],
+  ]) {
+    const storage = memoryStorage({
+      day: '2026-10-17',
+      count: 3,
+      key: { hash: keyHash('SECRET-KEY-1'), state, pausedUntil: far, streak: 2 },
+    });
+    const client = new AirVisualClient({ now: () => FIXTURE_NOW, storage });
+    client.useKey('SECRET-KEY-1');
+    assert.equal(client.keyState, state);
+    assert.equal(client.keyPausedUntil, FIXTURE_NOW + longest);
   }
 });

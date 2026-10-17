@@ -76,9 +76,13 @@
   month) of which 20 are kept for the test button.
 - **Retries (review)**: a passing failure (network, 5xx, unexpected answer)
   is retried at the usual interval, never sooner
-  (`max(interval, 10 min)`); `city_not_found`, `no_nearest_station` and a
-  refused node link every 6 hours. Simulated over 24 h: one misspelt city
-  and four good ones, or a 12-hour 5xx outage, stay ≤ 270 calls and the good
+  (`max(interval, 10 min)`); a 429 (location or node) at the later of that
+  and the end of its pause, so a run of short 60 s pauses never means a read
+  a minute; a refused key at the end of its pause (6 h); `city_not_found`,
+  `no_nearest_station` and a refused node link every 6 hours. A pause read
+  back from `/data` is capped at a fresh one (6 h). Simulated over 24 h:
+  one misspelt city and four good ones, a 12-hour 5xx outage or 12 hours of
+  bare 429s, stay ≤ 270 calls and the good
   cities are read until midnight.
 - **Persisted state (review)**: `/data/airvisual-budget.json` holds the day,
   the count, `lastCallAt` (the 13 s spacing), and the key state (state,

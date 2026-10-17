@@ -244,9 +244,20 @@ export class AirVisualApp {
   /** When a source that failed with `err` is tried again. */
   retryAt(source, err) {
     const now = this.now();
+    const isNode = source.type === DEVICE_TYPES.NODE;
+    const interval = (isNode ? this.config.nodePollMinutes : this.locationInterval()) * 60_000;
+    // A failure never makes a source read faster than its interval: a long
+    // outage, or a long run of short 429 pauses, must not drain the budget.
+    const usual = now + Math.max(interval, FAILED_RETRY);
     if (err instanceof AirVisualError) {
-      if (source.type !== DEVICE_TYPES.NODE && (err.kind === 'limited' || err.kind === 'refused')) {
+      if (!isNode && err.kind === 'refused') {
         return Math.max(now + 60_000, this.client.keyPausedUntil);
+      }
+      if (err.kind === 'limited') {
+        const pausedUntil = isNode
+          ? (this.client.nodePausedUntil.get(source.key)?.until ?? 0)
+          : this.client.keyPausedUntil;
+        return Math.max(usual, pausedUntil);
       }
       if (err.kind === 'budget') {
         return this.client.budget.resetsAt();
@@ -254,16 +265,8 @@ export class AirVisualApp {
       if (err.kind === 'not_found' || err.kind === 'no_station' || err.kind === 'denied') {
         return now + NOT_FOUND_RETRY;
       }
-      if (source.type === DEVICE_TYPES.NODE && err.kind === 'limited') {
-        return Math.max(now + 60_000, this.client.nodePausedUntil.get(source.key)?.until ?? 0);
-      }
     }
-    const interval =
-      (source.type === DEVICE_TYPES.NODE ? this.config.nodePollMinutes : this.locationInterval()) *
-      60_000;
-    // A passing failure (network, 5xx) never makes a source read faster than
-    // its interval: a long outage must not drain the daily budget.
-    return now + Math.max(interval, FAILED_RETRY);
+    return usual;
   }
 
   async fetch(source, { force = false, reserve = true } = {}) {

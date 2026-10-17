@@ -168,7 +168,9 @@ export class AirVisualClient {
         this.keyError = new AirVisualError('limited', 'call_limit_reached', { quota: true });
       }
       if (this.keyError) {
-        this.keyPausedUntil = Number(saved.pausedUntil);
+        // Never longer than a fresh pause would be (a clock jump, a bad file).
+        const longest = this.keyState === 'refused' ? REFUSED_BACKOFF : LIMITED_MAX;
+        this.keyPausedUntil = Math.min(Number(saved.pausedUntil), this.now() + longest);
         this.limitedStreak = Number.isInteger(saved.streak) ? saved.streak : 0;
       }
     }

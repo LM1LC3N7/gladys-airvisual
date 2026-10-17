@@ -33,10 +33,11 @@ export function memoryStorage(initial) {
  * content) as UNREADABLE. A write failure is warned once: memory only then.
  */
 export function fileStorage(path, { logger } = {}) {
-  let warned = false;
-  const warnOnce = (text) => {
-    if (!warned) {
-      warned = true;
+  // One warning per kind (read, write): a read problem never hides a write one.
+  const warned = new Set();
+  const warnOnce = (kind, text) => {
+    if (!warned.has(kind)) {
+      warned.add(kind);
       logger?.warn?.(text);
     }
   };
@@ -48,6 +49,7 @@ export function fileStorage(path, { logger } = {}) {
       } catch (err) {
         if (err.code !== 'ENOENT') {
           warnOnce(
+            'read',
             `Budget file unreadable (${err.code ?? 'error'}): half of today's budget assumed spent`,
           );
           return UNREADABLE;
@@ -62,7 +64,7 @@ export function fileStorage(path, { logger } = {}) {
       } catch {
         // Fall through: a corrupt file.
       }
-      warnOnce("Budget file corrupt: half of today's budget assumed spent");
+      warnOnce('read', "Budget file corrupt: half of today's budget assumed spent");
       return UNREADABLE;
     },
     save(value) {
@@ -72,7 +74,7 @@ export function fileStorage(path, { logger } = {}) {
         writeFileSync(tmp, JSON.stringify(value));
         renameSync(tmp, path);
       } catch (err) {
-        warnOnce(`Budget file not writable (${err.code ?? 'error'}): kept in memory`);
+        warnOnce('write', `Budget file not writable (${err.code ?? 'error'}): kept in memory`);
       }
     },
   };

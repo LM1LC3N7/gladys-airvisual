@@ -94,9 +94,10 @@ configuration :
   test. Au-delà, les lectures reprennent après minuit UTC ;
 - l'intervalle est relevé de lui-même si les lieux ne tiennent pas : cinq
   lieux sont lus toutes les 28 minutes au moins ;
-- une lecture en échec (réseau, erreur du serveur) est réessayée à
-  l'intervalle habituel, jamais plus tôt ; une ville introuvable ou aucune
-  ville à proximité, toutes les 6 heures.
+- une lecture en échec (réseau, erreur du serveur, 429) est réessayée à
+  l'intervalle habituel, jamais plus tôt (plus tard si une pause 429 dure
+  davantage) ; une ville introuvable ou aucune ville à proximité, toutes les
+  6 heures.
 
 | Lieux | Intervalle par défaut | Appels par jour | Appels par mois |
 | ----- | --------------------- | --------------- | --------------- |

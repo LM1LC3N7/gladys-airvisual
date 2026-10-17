@@ -522,3 +522,26 @@ test('secrets are scrubbed whatever their case; a refused node link says so', as
   assert.match(ctx.gladys.fake.connectionStatus.message.en, /link refused \(check the id\)/);
   assert.equal(ctx.client.keyState, 'ok', 'a node refusal is not the key');
 });
+
+test('12 hours of bare 429s never drain the day either', async () => {
+  const stamp = (c, now) => {
+    c.at = now;
+    if (now < MIDNIGHT + 12 * 60 * 60_000) {
+      return new Response('', { status: 429 });
+    }
+    return c.params.city === 'Nowhere' ? fail('city_not_found') : json(fixture('city.json'));
+  };
+  const { today, last } = await simulateDay(stamp);
+  assert.ok(today.length <= 270, `${today.length} calls in the UTC day`);
+  for (const city of ['Lyon', 'Paris', 'Nice', 'Brest']) {
+    assert.ok(last[city] >= MIDNIGHT + 23 * 60 * 60_000, `${city} still read before midnight`);
+  }
+});
+
+test('an AirVisual Pro in 429 is read at most once per interval', async () => {
+  const ctx = await setup({ config: { node_ids: NODE_ID }, start: false });
+  ctx.answers.node = () => new Response('', { status: 429 });
+  await ctx.app.start({ node_ids: NODE_ID });
+  await runMinutes(ctx.timers, ctx.clock, 60);
+  assert.ok(fake.calls.length <= 7, `${fake.calls.length} calls in an hour (every 10 min)`);
+});

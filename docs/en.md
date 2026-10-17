@@ -88,8 +88,9 @@ minute. The integration stays below, whatever the configuration:
   UTC;
 - the interval is raised automatically when the locations would not fit:
   five locations are read every 28 minutes at least;
-- a failed read (network, server error) is tried again at the usual
-  interval, never sooner; a city not found or no city nearby, every 6 hours.
+- a failed read (network, server error, 429) is tried again at the usual
+  interval, never sooner (later if a 429 pause lasts longer); a city not
+  found or no city nearby, every 6 hours.
 
 | Locations | Default interval | Calls a day | Calls a month |
 | --------- | ---------------- | ----------- | ------------- |

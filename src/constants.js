@@ -29,7 +29,7 @@ export const MAX_NODE_BODY = 1024 * 1024;
 
 /**
  * The free "Community" plan: 10 000 calls a month, 500 a day, 5 a minute.
- * The integration keeps to 290 calls per UTC day (290 × 31 = 8 990 a month),
+ * The integration keeps to 290 calls per UTC day (290 × 31 = 8 990 a month).
  * The periodic reads (the first read of each location after a start
  * included) stop at 270; the last 20 are kept for the test button.
  */
