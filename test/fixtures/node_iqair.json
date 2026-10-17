@@ -1,0 +1,14 @@
+{
+  "name": "Bedroom",
+  "current": {
+    "ts": "2026-10-17T10:28:00.000Z",
+    "aqius": 34,
+    "aqicn": 12,
+    "tp": 19.8,
+    "hm": 55,
+    "pr": 101300,
+    "co": 845,
+    "p2": { "conc": 8.1, "aqius": 34, "aqicn": 12 },
+    "p1": { "conc": 10.4, "aqius": 9, "aqicn": 10 }
+  }
+}

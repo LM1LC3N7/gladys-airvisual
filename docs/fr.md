@@ -1,67 +1,141 @@
-# Template de démonstration
+# AirVisual
 
-Ceci est la documentation utilisateur de l'intégration. Gladys ré-héberge ce
-fichier et affiche un lien **Documentation** permanent vers lui dans l'écran
-de configuration (dans la langue de l'utilisateur, avec l'anglais en repli) —
-c'est au moment de configurer que l'utilisateur en a le plus besoin. Gardez
-les courtes indications d'accueil dans les blocs `section` du `config_schema`
-du manifest ; mettez ici le pas-à-pas détaillé (captures d'écran, dépannage…).
+**Connecteur non officiel, sans lien avec IQAir.** Il amène dans Gladys la
+qualité de l'air de vos maisons et des villes de votre choix, lue par l'API
+officielle [IQAir AirVisual](https://www.iqair.com/air-pollution-data-api),
+et les valeurs de vos moniteurs **AirVisual Pro**, lues par leur lien cloud.
+
+> **Cette intégration n'a jamais été testée avec une vraie clé d'API ni avec
+> un vrai AirVisual Pro.** Elle suit la documentation officielle de l'API et
+> pyairvisual, le client Python qu'utilise Home Assistant. Merci de signaler
+> ce que vous constatez sur le forum de Gladys.
 
 ## Ce que vous obtenez
 
-Six appareils de démonstration apparaissent après l'installation : une
-station météo (vraies données Open-Meteo), un interrupteur, une lampe
-variable, une prise connectée avec mesure de puissance, un détecteur de
-mouvement et une caméra.
+| Appareil dans Gladys                    | Capteurs                                                                                           |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| **AirVisual _maison_** (une par maison) | AQI US, AQI Chine, polluant principal (US), polluant principal (Chine), de la ville la plus proche |
+| **AirVisual _ville_**                   | les mêmes valeurs pour une ville que vous avez saisie                                              |
+| **_nom_ (AirVisual Pro)**               | AQI US et Chine (quand le moniteur les envoie), PM2.5, PM10, CO2, température, humidité            |
+
+- AQI : fonctionnalités `airquality-sensor` (unité « AQI ») ; polluant
+  principal : un texte (PM2.5, PM10, O3, NO2, SO2, CO) ; PM2.5 et PM10 en
+  µg/m³, CO2 en ppm, température en °C, humidité en %.
+- AirVisual met une ville à jour environ une fois par heure ; une valeur de
+  plus de 3 heures (1 heure pour un moniteur) n'est pas envoyée à Gladys
+  comme valeur actuelle.
+- Les noms des appareils et des capteurs sont en anglais ; renommez-les à la
+  création si vous le souhaitez.
+
+## Installation
+
+1. Sur le [tableau de bord IQAir](https://dashboard.iqair.com/personal/api-keys),
+   créez une clé d'API gratuite **Community**.
+2. Installez l'intégration depuis le catalogue de Gladys (Gladys 5.1 ou plus
+   récent) et acceptez l'accès à la **position de vos maisons** (pour trouver
+   la ville la plus proche de chaque maison).
+3. Dans l'écran **Configuration**, collez la clé et enregistrez. En option,
+   ajoutez des villes et des identifiants d'AirVisual Pro (voir plus bas).
+4. Cliquez sur **Tester AirVisual** : le message liste les lieux et leurs
+   dernières valeurs.
+5. Ouvrez l'onglet **Découverte** et ajoutez les appareils voulus. Leurs
+   valeurs arrivent dès leur création.
 
 ## Configuration
 
-1. Ouvrez l'onglet **Configuration** de l'intégration.
-2. Renseignez la **latitude** et la **longitude** que la station météo de
-   démonstration doit observer (Paris par défaut), et choisissez votre unité
-   de température. L'**intervalle de rafraîchissement** règle la fréquence
-   de lecture de la station météo et de la puissance de la prise : toutes
-   les 5 minutes par défaut, toutes les minutes au plus.
-3. Enregistrez : les appareils apparaissent dans l'onglet **Découverte**,
-   prêts à être ajoutés.
+- **Clé d'API** : gardée par Gladys dans sa base (en clair, comme tout champ
+  secret de Gladys), jamais réaffichée dans l'écran de configuration, jamais
+  écrite dans les journaux, et envoyée seulement à `api.airvisual.com`.
+- **Qualité de l'air des maisons** (activée par défaut) : un lieu par maison
+  qui a une position dans Gladys (Paramètres → Maisons). La position,
+  arrondie à 2 décimales (1 km environ), est envoyée à AirVisual, qui répond
+  avec sa ville la plus proche.
+- **Villes** : écrites comme AirVisual les écrit, `Ville, Région, Pays`,
+  séparées par `;`, par exemple
+  `Paris, Ile-de-France, France; Lyon, Auvergne-Rhone-Alpes, France`. Une
+  mauvaise orthographe donne « introuvable » dans l'état ; l'orthographe
+  d'AirVisual est celle de son site (iqair.com), en anglais et sans accents
+  le plus souvent. **Cinq lieux au maximum**, maisons comprises.
+- **Intervalle de lecture de chaque lieu** (30 minutes par défaut, de 10 à
+  360).
+- **Identifiants des AirVisual Pro** : sur le tableau de bord IQAir, ouvrez
+  le moniteur et copiez l'identifiant de son lien d'API (ou le lien entier,
+  `https://device.iqair.com/v2/...` ou
+  `https://www.airvisual.com/api/v2/node/...` ; aucune autre adresse n'est
+  acceptée). Séparez-en plusieurs par des virgules, cinq au maximum.
+  L'identifiant donne accès aux valeurs du moniteur : c'est un champ secret,
+  jamais réaffiché, saisissez donc la liste entière pour la changer. Dans
+  Gladys, un moniteur est connu par une empreinte de son identifiant, jamais
+  par l'identifiant lui-même. Aucune clé d'API n'est nécessaire pour les
+  moniteurs.
+- **Intervalle de lecture des AirVisual Pro** (10 minutes par défaut, de 5 à
+  60).
 
-Le réglage **Préférer la connexion locale** pilote la prise de
-démonstration : elle affiche en badge le canal réellement utilisé (local ou
-cloud), avec un point orange quand elle fonctionne en mode dégradé (local
-refusé, bascule cloud).
+## Limites d'usage (plan gratuit « Community »)
 
-## Actions
+Le plan gratuit permet **10 000 appels par mois**, 500 par jour et environ 5
+par minute. L'intégration reste en dessous, quelle que soit la
+configuration :
 
-- **Tester le fournisseur météo** — effectue une requête en direct vers
-  Open-Meteo et affiche la température et l'humidité actuelles sous le
-  bouton.
-- **Identifier un appareil** — choisissez un de vos appareils dans la liste
-  et il se signale (la lampe de démonstration « clignote » dans les logs).
+- un appel par lieu à chaque intervalle ; un démarrage du conteneur lit
+  chaque lieu une fois (une reconnexion à Gladys, non) ; un appel par clic sur
+  le bouton de test (il ne lit que le premier lieu et affiche les dernières
+  valeurs des autres) ;
+- jamais deux appels à moins de 13 secondes d'écart (4,6 par minute au
+  plus) ;
+- au plus **290 appels par jour UTC** (8 990 par mois), comptés dans un
+  fichier sous `/data` pour qu'un redémarrage ne les remette pas à zéro ; les
+  lectures périodiques s'arrêtent à 270 et en gardent 20 pour le bouton de
+  test. Au-delà, les lectures reprennent après minuit UTC ;
+- l'intervalle est relevé de lui-même si les lieux ne tiennent pas : cinq
+  lieux sont lus toutes les 27 minutes au moins.
 
-## Scènes
+| Lieux | Intervalle par défaut | Appels par jour | Appels par mois |
+| ----- | --------------------- | --------------- | --------------- |
+| 1     | 30 min                | 48              | 1 490 environ   |
+| 3     | 30 min                | 144             | 4 460 environ   |
+| 5     | 30 min                | 240             | 7 440 environ   |
 
-L'intégration ajoute ses propres cartes à l'éditeur de scènes (Gladys 5.1
-ou plus récent), dans la catégorie **Intégrations** :
+Quand AirVisual répond **429** (« call limit reached » ou « too many
+requests »), tous les appels avec la clé s'arrêtent, bouton de test compris :
+le délai `Retry-After` si AirVisual en donne un, sinon 1 minute pour « too
+many requests » et 1 heure, puis le double à chaque fois, pour « call limit
+reached » ; toujours entre 1 minute et 6 heures. Une pause survit à une
+reconnexion à Gladys.
 
-- **Mouvement détecté** (déclencheur) — lance la scène quand un détecteur
-  de démonstration voit bouger quelque chose. Choisissez éventuellement le
-  détecteur et ce qui a bougé (personne, animal) ; laissés vides, toute
-  détection correspond. Les actions suivantes peuvent lire ce qui a bougé
-  avec `{{triggerEvent.data.target}}`.
-- **Identifier un appareil** (action) — fait se signaler l'appareil choisi.
-  Elle indique si l'appareil a pu se signaler, pour que les actions
-  suivantes puissent en dépendre.
+Quand AirVisual **refuse la clé** (erronée, expirée, sans accès), les
+lectures avec la clé s'arrêtent et l'état le dit ; un nouvel essai toutes les
+6 heures (le bouton de test peut essayer tout de suite), jusqu'à ce que vous
+changiez la clé. Les AirVisual Pro continuent d'être lus.
 
-## Tableau de bord
-
-Ajoutez le widget **État de la démo** à un tableau de bord : il affiche en
-direct la température de la station météo et la puissance de la prise du
-bureau, la connexion utilisée par la prise (en orange si dégradée) et la
-position observée. Son bouton **Identifier la lampe** fait se signaler la
-lampe de démonstration.
+Les liens des AirVisual Pro n'utilisent pas la clé d'API ; ils sont lus à
+leur propre intervalle, un appel à la fois, à 2 secondes d'écart.
 
 ## Dépannage
 
-L'intégration journalise tout ce qu'elle fait : consultez les logs de
-l'intégration depuis l'interface Gladys (ou `docker logs` sur l'hôte) avec
-`LOG_LEVEL=debug` pour le détail complet.
+- **« AirVisual a refusé la clé d'API »** : vérifiez la clé sur le tableau de
+  bord IQAir ; une clé Community expire au bout d'un an et se renouvelle là.
+- **« introuvable »** à côté d'une ville : vérifiez son orthographe (ville,
+  région, pays, en anglais, comme sur iqair.com).
+- **« aucune ville à proximité »** : AirVisual n'a pas de ville assez proche
+  de la position de la maison ; saisissez une ville à la place.
+- **« Le budget d'appels du jour du plan gratuit est épuisé »** : un autre
+  outil utilise peut-être la même clé ; les lectures reprennent après minuit
+  UTC.
+- Journaux : le niveau se règle avec la variable `LOG_LEVEL`.
+
+## Vie privée
+
+Les positions des maisons (arrondies à 1 km environ) et les villes saisies
+sont envoyées à AirVisual (IQAir) pour lire leur qualité de l'air. La clé ne
+part que vers `api.airvisual.com`, les identifiants des moniteurs que vers
+les deux adresses AirVisual ci-dessus, en HTTPS.
+
+## Crédits
+
+Construit d'après la documentation officielle de l'API AirVisual et
+[pyairvisual](https://github.com/bachya/pyairvisual) (MIT, Aaron Bach), le
+client Python des intégrations AirVisual de Home Assistant : points d'accès,
+messages d'erreur, réponses des moniteurs. Sa notice est dans
+`THIRD_PARTY_NOTICES.md`. AirVisual et IQAir sont des marques de leur
+propriétaire ; ce connecteur est gratuit et non officiel.

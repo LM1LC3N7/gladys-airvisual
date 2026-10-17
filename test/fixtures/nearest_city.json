@@ -1,0 +1,28 @@
+{
+  "status": "success",
+  "data": {
+    "city": "Paris",
+    "state": "Ile-de-France",
+    "country": "France",
+    "location": { "type": "Point", "coordinates": [2.351666, 48.859425] },
+    "current": {
+      "pollution": {
+        "ts": "2026-10-17T10:00:00.000Z",
+        "aqius": 42,
+        "mainus": "p2",
+        "aqicn": 15,
+        "maincn": "p1"
+      },
+      "weather": {
+        "ts": "2026-10-17T10:00:00.000Z",
+        "ic": "04d",
+        "hu": 81,
+        "pr": 1018,
+        "tp": 12,
+        "wd": 210,
+        "ws": 3.1,
+        "heatIndex": 12
+      }
+    }
+  }
+}

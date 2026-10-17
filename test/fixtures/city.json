@@ -1,0 +1,27 @@
+{
+  "status": "success",
+  "data": {
+    "city": "Lyon",
+    "state": "Auvergne-Rhone-Alpes",
+    "country": "France",
+    "location": { "type": "Point", "coordinates": [4.8357, 45.764] },
+    "current": {
+      "pollution": {
+        "ts": "2026-10-17T09:00:00.000Z",
+        "aqius": 61,
+        "mainus": "o3",
+        "aqicn": 30,
+        "maincn": "o3"
+      },
+      "weather": {
+        "ts": "2026-10-17T10:00:00.000Z",
+        "ic": "01d",
+        "hu": 70,
+        "pr": 1020,
+        "tp": 14,
+        "wd": 180,
+        "ws": 2.1
+      }
+    }
+  }
+}
