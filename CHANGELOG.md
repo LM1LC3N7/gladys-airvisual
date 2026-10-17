@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-17
+
 ### Added
 
 - The air quality of your houses in Gladys, through the official IQAir
@@ -35,4 +37,5 @@ the notes of the version's GitHub Release.
 - "Test AirVisual" button: one call to check the key, the last values of
   every location and of the monitors.
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-airvisual/commits/main
+[Unreleased]: https://github.com/LM1LC3N7/gladys-airvisual/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-airvisual/releases/tag/v0.1.1

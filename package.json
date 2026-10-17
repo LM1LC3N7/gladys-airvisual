@@ -1,6 +1,6 @@
 {
   "name": "gladys-airvisual",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "IQAir AirVisual for Gladys Assistant: the air quality (US and China AQI, main pollutant) of your houses and cities, and your AirVisual Pro monitors, through the official cloud API.",
   "type": "module",
