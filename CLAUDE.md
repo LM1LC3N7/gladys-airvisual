@@ -17,7 +17,7 @@ free API key) and AirVisual Pro monitors (cloud link, no key).
 
 ```bash
 npm install
-npm test                                  # node --test, the built-in runner
+npm test                                  # node --test --test-timeout=60000
 node --test test/app.test.js              # one file
 node --test --test-name-pattern "429"     # tests whose name matches
 npm run lint                              # ESLint
@@ -49,6 +49,11 @@ test/                             node --test, against the SDK's fake Gladys (in
 
 ## Rules
 
+- **Features follow the core model.** Every feature has a numeric `min` and
+  `max` (0/0 for text), `read_only` and `has_feedback`: Gladys answers HTTP 422
+  otherwise, and the SDK's fake Gladys does not check it
+  (`test/helpers/coreFeature.js` does). Devices carry `should_poll: false`
+  (Gladys 5.3 polls a device with `poll_frequency` unless it says so).
 - **External ids are forever.** Build them with
   `gladys.externalIds(type, platformId)`, `platformId` being the unique id the
   platform gives the device (serial, cloud id, MAC), never a label. Gladys keys

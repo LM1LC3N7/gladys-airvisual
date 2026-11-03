@@ -11,6 +11,7 @@ import { createFakeGladys } from '@gladysassistant/integration-sdk/testing';
 import { ACTIONS, DEVICE_TYPES } from '../src/constants.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
 import { deviceOf } from '../src/readings.js';
+import { assertCoreDevice } from './helpers/coreFeature.js';
 
 const readBuffer = (path) => readFileSync(new URL(`../${path}`, import.meta.url));
 const read = (path) => readBuffer(path).toString('utf8');
@@ -209,4 +210,25 @@ test('every feature uses a unit the core lists for its category', () => {
       }
     }
   }
+});
+
+test('every feature of every device type has a numeric min and max and the other core fields', () => {
+  const gladys = createFakeGladys({ selector: 'airvisual' });
+  const full = {
+    aqius: 10,
+    aqicn: 10,
+    mainus: 'PM2.5',
+    maincn: 'PM10',
+    p2: 1,
+    p1: 1,
+    co: 400,
+    tp: 20,
+    hm: 50,
+  };
+  let features = 0;
+  for (const type of Object.values(DEVICE_TYPES)) {
+    const device = deviceOf(gladys, { source: { type, key: 'x', name: 'X' }, values: full, ts: 0 });
+    features += assertCoreDevice(device, type);
+  }
+  assert.equal(features, 4 + 4 + 7);
 });
